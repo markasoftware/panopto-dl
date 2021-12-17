@@ -14,6 +14,12 @@ then
 	exit 1
 fi
 
+if ! command -v youtube-dl >/dev/null
+then
+	echo 'You must install `youtube-dl`'
+	exit 1
+fi
+
 cookie_file=$1
 url_host=$2
 folder_id=$3
@@ -30,27 +36,29 @@ function ez_curl {
 }
 
 echo 'Downloading folder...'
-viewer_urls=$(ez_curl -XPOST -H 'Content-Type: application/json' \
+delivery_ids=$(ez_curl -XPOST -H 'Content-Type: application/json' \
 	--data "{\"queryParameters\":{\"maxResults\":999,\"folderID\":\"$folder_id\"}}" \
 	"https://$url_host/Panopto/Services/Data.svc/GetSessions" \
-	| jq -r '.d.Results[] | .SessionName, .ViewerUrl')
+	| jq -r '.d.Results[] | .SessionName, .DeliveryID')
 
-echo "$(($(echo -n "$viewer_urls" | wc -l)/2)) videos found."
+echo "$(($(echo -n "$delivery_ids" | wc -l)/2)) videos found."
 is_name=true
 IFS='
 '
-for viewer_url in $viewer_urls
+for delivery_id in $delivery_ids
 do
 	if $is_name
 	then
 		is_name=false
-		next_name=$viewer_url
+		next_name=$delivery_id
 	else
 		is_name=true
 		echo 'Downloading video details...'
-		video_url=$(ez_curl "$viewer_url" | grep -oEm1 'https://.*?Podcast/Social/.*?mp4')
-		echo "Downloading video: $next_name from $video_url..."
-		ez_curl -Lo "$next_name.mp4" "$video_url"
+		m3u8_link=$(ez_curl -XPOST --data "responseType=json&deliveryId=$delivery_id" \
+			"https://$url_host/Panopto/Pages/Viewer/DeliveryInfo.aspx" \
+			| jq -r '.Delivery.Streams[0].StreamUrl')
+		echo "Downloading video: $next_name..."
+		youtube-dl -o "$next_name.%(ext)s" "$m3u8_link"
 	fi
 done
 
